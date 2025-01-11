@@ -2,13 +2,12 @@
 // Use of this source code is governed by a
 // license that can be found in the LICENSE file.
 
-// TODO: find an efficient way to decode that doesn't decode everything at once.
-//      Some sort of chunking.
-
 package huffman
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"math"
 	"slices"
 )
@@ -21,12 +20,11 @@ type Symbol = uint32
 
 // A Code is a mapping from Symbols to bit sequences.
 type Code struct {
-	codes []bits
+	codes []bitcode
 }
 
-type bits struct {
-	val uint32
-	len uint8
+type bitcode struct {
+	val, len uint32
 }
 
 // NewCode constructs a [Code] for symbols with the given frequencies.
@@ -42,8 +40,17 @@ func NewCode(frequencies []int) (*Code, error) {
 			return nil, errors.New("huffman.NewCode: negative frequency")
 		}
 	}
-	// TODO
-	return nil, nil
+	enc := newHuffmanEncoder(len(frequencies))
+	freqs := make([]int32, len(frequencies))
+	for i, f := range frequencies {
+		freqs[i] = int32(f)
+	}
+	enc.generate(freqs, 15)
+	c := &Code{codes: make([]bitcode, len(enc.codes))}
+	for i, hc := range enc.codes {
+		c.codes[i] = bitcode{val: uint32(hc.code), len: uint32(hc.len)}
+	}
+	return c, nil
 }
 
 // Marshal compactly represents the Code as a sequence of bytes.
@@ -57,15 +64,16 @@ func UnmarshalCode(data []byte) (*Code, error) {
 	return nil, nil
 }
 
-// TODO: is a bits for (byte) faster?
+// TODO: is a code for (byte) faster?
 // TODO: just panic if out of range?
-func (c *Code) bits(s Symbol) bits {
+func (c *Code) code(s Symbol) bitcode {
 	if s >= uint32(len(c.codes)) {
-		return bits{}
+		return bitcode{}
 	}
 	return c.codes[s]
 }
 
+// TODO: return (int, []Symbol) so SplitFunc doesn't have to consume all its input.
 type SplitFunc func([]byte) []Symbol
 
 type CodeBuilder struct {
@@ -77,20 +85,33 @@ func NewCodeBuilder(split SplitFunc) *CodeBuilder {
 	return &CodeBuilder{split: split}
 }
 
+// Always returns a nil error.
 func (cb *CodeBuilder) Write(data []byte) (int, error) {
-	syms := cb.split(data)
-	for _, s := range syms {
-		ulen := uint32(len(cb.freqs))
-		if ulen < s {
-			n := int(s-ulen) + 1
-			cb.freqs = slices.Grow(cb.freqs, n)
-			for range n {
-				cb.freqs = append(cb.freqs, 0)
-			}
+	if cb.split != nil {
+		syms := cb.split(data)
+		for _, s := range syms {
+			cb.growFreqs(s)
+			cb.freqs[s]++
 		}
-		cb.freqs[s]++
+	} else {
+		for _, b := range data {
+			cb.growFreqs(uint32(b))
+			cb.freqs[b]++
+		}
 	}
 	return len(data), nil
+}
+
+// growFreqs grows cb.freqs so that freqs[n] will not panic.
+func (cb *CodeBuilder) growFreqs(n uint32) {
+	ulen := uint32(len(cb.freqs))
+	if ulen <= n {
+		g := int(n-ulen) + 1
+		cb.freqs = slices.Grow(cb.freqs, g)
+		for range g {
+			cb.freqs = append(cb.freqs, 0)
+		}
+	}
 }
 
 func (cb *CodeBuilder) Code() (*Code, error) {
@@ -99,53 +120,55 @@ func (cb *CodeBuilder) Code() (*Code, error) {
 
 // An Encode encodes symbols with a [Code].
 type Encoder struct {
-	c   *Code
-	err error
+	c     *Code
+	bw    *bitWriter
+	split SplitFunc
 }
 
-func (c *Code) NewEncoder() *Encoder {
-	return &Encoder{c: c}
+// If there is no SplitFunc, it is an error if the Encoder's [Code] contains more than 256 symbols
+func (c *Code) NewEncoder(w io.Writer, split SplitFunc) *Encoder {
+	if split == nil && len(c.codes) > 256 {
+		panic("no split func but more than 256 codes")
+	}
+	return &Encoder{c: c, bw: newBitWriter(w), split: split}
 }
 
-// It is an error if the Encoder's [Code] contains more than 256 symbols, or if any
+// If there is no SplitFunc, it is an error if the Encoder's [Code] contains more than 256 symbols, or if any
 // of the byte values exceed the largest symbol, or if any of the byte values had
 // a zero frequency when the [Code] was constructed.
-func (e *Encoder) AddBytes(data []byte) {
-	for _, b := range data {
-		_ = b
+// Always returns len(data), nil. Errors reported by [Encoder.Close].
+func (e *Encoder) Write(data []byte) (int, error) {
+	if e.split != nil {
+		e.AddSymbols(e.split(data))
+	} else {
+		for _, b := range data {
+			e.AddSymbol(Symbol(b))
+		}
 	}
+	return len(data), nil
 }
 
 func (e *Encoder) AddSymbol(s Symbol) {
-	if e.err != nil {
-		return
+	// TODO: faster to have a specialized bits(byte)?
+	b := e.c.code(s)
+	if b.len == 0 {
+		panic(fmt.Sprintf("no code for symbol %d", s))
 	}
-	// TODO
+	// TODO: benchmark if WriteBits takes a uint8, or bits.len is an int.
+	e.bw.WriteBits(b.val, int(b.len))
 }
 
 func (e *Encoder) AddSymbols(syms []Symbol) {
 	for _, s := range syms {
-		if e.err != nil {
-			return
-		}
 		e.AddSymbol(s)
 	}
 }
 
 // Bytes returns the encoded bytes constructed from the calls to the AddXXX methods,
 // along with the first error encountered while adding.
-func (e *Encoder) Bytes() ([]byte, error) {
-	if e.err != nil {
-		return nil, e.err
-	}
-	return nil, nil
+func (e *Encoder) Close() error {
+	return e.bw.Close()
 }
-
-// Err returns the first error encountered from adding data, if any.
-func (e *Encoder) Err() error { return e.err }
-
-// Reset restores the Encoder to its initial state.
-func (e *Encoder) Reset() {}
 
 // A Decoder decodes data encoded by an Encoder.
 type Decoder struct{}

@@ -21,11 +21,11 @@ func TestWriteBits(t *testing.T) {
 		var ns [N]int
 		for i := range 32 {
 			ns[i] = i + 1
-			bs[i] = rand.Uint32() & ((1 << ns[i]) - 1)
+			bs[i] = masklow(rand.Uint32(), ns[i])
 		}
 		for i := range 32 {
 			ns[i+32] = i + 1
-			bs[i+32] = rand.Uint32() & ((1 << ns[i+32]) - 1)
+			bs[i+32] = masklow(rand.Uint32(), ns[i+32])
 		}
 		rand.Shuffle(N, func(i, j int) {
 			bs[i], bs[j] = bs[j], bs[i]
@@ -37,6 +37,11 @@ func TestWriteBits(t *testing.T) {
 
 	testBitWriter(t, []uint32{17, 1232323, 1 << 31}, []int{32, 32, 32})
 	testBitWriter(t, []uint32{0, 1, 1, 1, 0, 1}, []int{1, 1, 1, 1, 1, 1})
+}
+
+// preserve only the low-order n bits of u.
+func masklow(u uint32, n int) uint32 {
+	return u & ((uint32(1) << n) - 1)
 }
 
 func testBitWriter(t *testing.T, bs []uint32, ns []int) {
@@ -91,12 +96,4 @@ func bitstring(bs []uint32, ns []int) string {
 		bytes = append(bytes, s)
 	}
 	return strings.Join(bytes, ":")
-}
-
-func TestBitstring(t *testing.T) {
-	got := bitstring([]uint32{1, 6}, []int{4, 2})
-	want := "000110"
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
 }
