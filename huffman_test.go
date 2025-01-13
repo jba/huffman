@@ -7,6 +7,7 @@ package huffman
 import (
 	"bytes"
 	"encoding/hex"
+	"slices"
 	"testing"
 )
 
@@ -59,4 +60,41 @@ func TestEncodeDecode(t *testing.T) {
 	if got != want {
 		t.Errorf("got %s, want %s", got, want)
 	}
+}
+
+func TestCodeMarshal(t *testing.T) {
+	for _, tc := range []struct {
+		lens []int
+		want []byte
+	}{
+		{[]int{1}, []byte{0<<5 | 1}},
+		{[]int{1, 1, 1}, []byte{0<<5 | 1, 1<<5 | 1}},
+		{[]int{1, 1, 1, 2, 3, 3, 3, 3}, []byte{0<<5 | 1, 1<<5 | 1, 0<<5 | 2, 2<<5 | 3}},
+		{slices.Repeat([]int{12}, 128), []byte{7<<5 | 12}},
+		{slices.Repeat([]int{12}, 130), []byte{7<<5 | 12, 1<<5 | 12}},
+		{slices.Repeat([]int{12}, 256), []byte{7<<5 | 12, 7<<5 | 12}},
+	} {
+		var c Code
+		for _, l := range tc.lens {
+			c.codes = append(c.codes, bitcode{len: uint32(l)})
+		}
+		marsh := c.Marshal()
+		if marsh[0] != 0b11000000 {
+			t.Fatal("bad first byte")
+		}
+		got := marsh[1:]
+		if !bytes.Equal(got, tc.want) {
+			t.Errorf("%v:\ngot  %v\nwant %v", tc.lens, got, tc.want)
+		}
+
+		dec := UnmarshalCode(marsh)
+		for i := range min(len(c.codes, dec.codes)) {
+			if g, w := c.codes[i], dec.codes[i]; g != w {
+				t.Errorf("%3d: %d != %d", i, g, w)
+			}
+
+		}
+
+	}
+
 }

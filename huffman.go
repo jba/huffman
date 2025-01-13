@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"slices"
 )
 
@@ -27,13 +26,15 @@ type bitcode struct {
 	val, len uint32
 }
 
+const maxCodeLen = 20
+
 // NewCode constructs a [Code] for symbols with the given frequencies.
 // The values at frequencies[i] is the frequency for Symbol(i).
 // If a frequency is 0, the corresponding symbol must not appear
 // in the input given to an [Encoder].
 func NewCode(frequencies []int) (*Code, error) {
-	if len(frequencies) > math.MaxInt32 {
-		return nil, errors.New("huffman.NewCode: too many frequencies (max 2^32)")
+	if len(frequencies) > 1<<maxCodeLen {
+		return nil, fmt.Errorf("huffman.NewCode: too many frequencies (max 2^%d)", maxCodeLen)
 	}
 	for _, f := range frequencies {
 		if f < 0 {
@@ -53,15 +54,61 @@ func NewCode(frequencies []int) (*Code, error) {
 	return c, nil
 }
 
+const marshalVersion = 0
+
 // Marshal compactly represents the Code as a sequence of bytes.
 func (c *Code) Marshal() []byte {
-	// Use algorithm like RFC 1951, but with a larger alphabet to handle larger code sizes.
-	return nil
+	// We may eventually use an algorithm like RFC 1951, but with a larger alphabet to handle larger code sizes.
+	// For now we do something simpler:
+	// The data contains the code sizes for each symbol in the alphabet.
+	// First byte: version number, with the top two bits 1's as a tiny magic header.
+	// Other bytes:
+	// - bottom five bits are code size 0-20 (the rest are wasted)
+	// - top three bits are 2^repetitions (0=1, 1=2, 2=4, ..., 7=128)
+
+	buf := []byte{0b11<<6 | marshalVersion}
+	i := 0
+	for i < len(c.codes) {
+		n := c.codes[i].len
+		var j int
+		for j = i + 1; j < len(c.codes) && c.codes[j].len == n; j++ {
+		}
+		rep := j - i
+		for rep > 0 {
+			r := min(rep, 128)
+			rep -= r
+			p := uint32(0)
+			for r > 0 && p < 8 {
+				if r&1 == 1 {
+					buf = append(buf, byte(p<<5|n))
+				}
+				r >>= 1
+				p++
+			}
+		}
+		i = j
+	}
+	return buf
 }
 
 // UnmarshalCode reconstructs a [Code] from the data, which must have been created with [Code.Marshal].
 func UnmarshalCode(data []byte) (*Code, error) {
-	return nil, nil
+	if len(data) == 0 {
+		return nil, errors.New("huffman.UnmarshalCode: empty data")
+	}
+	if data[0] != byte(0b11<<6|marshalVersion) {
+		return nil, errors.New("huffman.UnmarshalCode: bad magic/version")
+	}
+	var codes []bitcode
+	for _, b := range data[1:] {
+		len := b & 0b11111
+		rep := b >> 5
+		codes = slices.Grow(codes, int(rep))
+		for range rep {
+			codes = append(codes, bitcode{len: uint32(len)})
+		}
+	}
+	return &Code{codes: codes}, nil
 }
 
 // TODO: is a code for (byte) faster?
@@ -139,16 +186,20 @@ func (c *Code) NewEncoder(w io.Writer, split SplitFunc) *Encoder {
 // Always returns len(data), nil. Errors reported by [Encoder.Close].
 func (e *Encoder) Write(data []byte) (int, error) {
 	if e.split != nil {
-		e.AddSymbols(e.split(data))
+		e.WriteSymbols(e.split(data))
 	} else {
-		for _, b := range data {
-			e.AddSymbol(Symbol(b))
-		}
+		e.WriteBytes(data)
 	}
 	return len(data), nil
 }
 
-func (e *Encoder) AddSymbol(s Symbol) {
+func (e *Encoder) WriteBytes(bs []byte) {
+	for _, b := range bs {
+		e.WriteSymbol(Symbol(b))
+	}
+}
+
+func (e *Encoder) WriteSymbol(s Symbol) {
 	// TODO: faster to have a specialized bits(byte)?
 	b := e.c.code(s)
 	if b.len == 0 {
@@ -158,12 +209,13 @@ func (e *Encoder) AddSymbol(s Symbol) {
 	e.bw.WriteBits(b.val, int(b.len))
 }
 
-func (e *Encoder) AddSymbols(syms []Symbol) {
+func (e *Encoder) WriteSymbols(syms []Symbol) {
 	for _, s := range syms {
-		e.AddSymbol(s)
+		e.WriteSymbol(s)
 	}
 }
 
+// TODO: rewrite
 // Bytes returns the encoded bytes constructed from the calls to the AddXXX methods,
 // along with the first error encountered while adding.
 func (e *Encoder) Close() error {
