@@ -63,16 +63,19 @@ func TestEncodeDecode(t *testing.T) {
 }
 
 func TestCodeMarshal(t *testing.T) {
-	for _, tc := range []struct {
+	for tci, tc := range []struct {
 		lens []int
 		want []byte
 	}{
-		{[]int{1}, []byte{0<<5 | 1}},
-		{[]int{1, 1, 1}, []byte{0<<5 | 1, 1<<5 | 1}},
-		{[]int{1, 1, 1, 2, 3, 3, 3, 3}, []byte{0<<5 | 1, 1<<5 | 1, 0<<5 | 2, 2<<5 | 3}},
-		{slices.Repeat([]int{12}, 128), []byte{7<<5 | 12}},
-		{slices.Repeat([]int{12}, 130), []byte{7<<5 | 12, 1<<5 | 12}},
-		{slices.Repeat([]int{12}, 256), []byte{7<<5 | 12, 7<<5 | 12}},
+		// The zero form: RRRRRRR0
+		{[]int{0}, []byte{0b00}},
+		{[]int{0, 0, 0}, []byte{0b100}},
+		{slices.Repeat([]int{0}, 130), []byte{127 << 1, 1 << 1}},
+		// The 1-16 form: RRCCCC01
+		{[]int{1, 2, 2, 5, 5, 5}, []byte{0b00_0000_01, 0b01_0001_01, 0b10_0100_01}},
+		{append(slices.Repeat([]int{3}, 10), 11), []byte{0b11_0010_01, 0b11_0010_01, 0b01_0010_01, 0b00_1010_01}},
+		// The 17-20 form: RRRRCC11
+		{[]int{20, 20, 17}, []byte{0b0001_11_11, 0b0000_00_11}},
 	} {
 		var c Code
 		for _, l := range tc.lens {
@@ -84,17 +87,31 @@ func TestCodeMarshal(t *testing.T) {
 		}
 		got := marsh[1:]
 		if !bytes.Equal(got, tc.want) {
-			t.Errorf("%v:\ngot  %v\nwant %v", tc.lens, got, tc.want)
+			t.Errorf("%v:\ngot  %b\nwant %b", tc.lens, got, tc.want)
 		}
 
-		dec := UnmarshalCode(marsh)
-		for i := range min(len(c.codes, dec.codes)) {
-			if g, w := c.codes[i], dec.codes[i]; g != w {
-				t.Errorf("%3d: %d != %d", i, g, w)
+		dec, err := UnmarshalCode(marsh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g, w := len(dec.codes), len(c.codes); g != w {
+			t.Fatalf("#%d: decoded %d codes, wanted %d", tci, g, w)
+		}
+		for i := range len(c.codes) {
+			if g, w := c.codes[i].len, dec.codes[i].len; g != w {
+				t.Errorf("#%d: %3d: %d != %d", tci, i, g, w)
 			}
 
 		}
-
 	}
+}
 
+func TestAssignValues(t *testing.T) {
+	// Example from RFC 1951, section 3.2.2.
+	codes := []bitcode{{0, 2}, {0, 1}, {0, 3}, {0, 3}}
+	want := []bitcode{{2, 2}, {0, 1}, {6, 3}, {7, 3}}
+	assignValues(codes)
+	if !slices.Equal(codes, want) {
+		t.Errorf("got %v, want %v", codes, want)
+	}
 }

@@ -58,37 +58,55 @@ const marshalVersion = 0
 
 // Marshal compactly represents the Code as a sequence of bytes.
 func (c *Code) Marshal() []byte {
+	// Encode the lengths of the bitcodes, in order.
 	// We may eventually use an algorithm like RFC 1951, but with a larger alphabet to handle larger code sizes.
-	// For now we do something simpler:
-	// The data contains the code sizes for each symbol in the alphabet.
+	// For now we do something simpler, and byte-oriented.
 	// First byte: version number, with the top two bits 1's as a tiny magic header.
 	// Other bytes:
-	// - bottom five bits are code size 0-20 (the rest are wasted)
-	// - top three bits are 2^repetitions (0=1, 1=2, 2=4, ..., 7=128)
+	// There are three formats:
+	//   RRRRRRR0:  length 0, with 7 bits of repeat (1-128)
+	//   RRLLLL01:  lengths 1-16, with 2 bits of repeat (1-4)
+	//   RRRRLL11:  lengths 17-20, with 4 bits of repeat (1-16)
 
 	buf := []byte{0b11<<6 | marshalVersion}
+
+	rep := func(R, len int, bottom byte) {
+		shift := 8 - len
+		max := 1 << len
+		for R >= max {
+			buf = append(buf, byte((max-1)<<shift)|bottom)
+			R -= max
+		}
+		if R > 0 {
+			buf = append(buf, byte((R-1)<<shift)|bottom)
+		}
+	}
+
 	i := 0
 	for i < len(c.codes) {
-		n := c.codes[i].len
+		L := c.codes[i].len
 		var j int
-		for j = i + 1; j < len(c.codes) && c.codes[j].len == n; j++ {
+		for j = i + 1; j < len(c.codes) && c.codes[j].len == L; j++ {
 		}
-		rep := j - i
-		for rep > 0 {
-			r := min(rep, 128)
-			rep -= r
-			p := uint32(0)
-			for r > 0 && p < 8 {
-				if r&1 == 1 {
-					buf = append(buf, byte(p<<5|n))
-				}
-				r >>= 1
-				p++
-			}
+		R := j - i
+		// Code C appears R times consecutively.
+		switch {
+		case L == 0:
+			rep(R, 7, 0)
+
+		case L >= 1 && L <= 16:
+			rep(R, 2, byte((L-1)<<2|1))
+
+		case L >= 17 && L <= 20:
+			rep(R, 4, byte((L-17)<<2|0b11))
+
+		default:
+			panic(fmt.Sprintf("code out of range 0-20: %d", L))
 		}
 		i = j
 	}
 	return buf
+	// Encode the lengths of the bitcodes, in order.
 }
 
 // UnmarshalCode reconstructs a [Code] from the data, which must have been created with [Code.Marshal].
@@ -101,14 +119,46 @@ func UnmarshalCode(data []byte) (*Code, error) {
 	}
 	var codes []bitcode
 	for _, b := range data[1:] {
-		len := b & 0b11111
-		rep := b >> 5
-		codes = slices.Grow(codes, int(rep))
-		for range rep {
-			codes = append(codes, bitcode{len: uint32(len)})
+		var L, R byte
+		switch {
+		case b&1 == 0:
+			L = 0
+			R = b>>1 + 1
+		case b&3 == 1:
+			L = (b>>2)&15 + 1
+			R = b>>6 + 1
+		case b&3 == 3:
+			L = (b>>2)&3 + 17
+			R = b>>4 + 1
+		}
+		codes = slices.Grow(codes, int(R))
+		for range R {
+			codes = append(codes, bitcode{len: uint32(L)})
 		}
 	}
+	assignValues(codes)
 	return &Code{codes: codes}, nil
+}
+
+func assignValues(codes []bitcode) {
+	// Assign values to the codes, given their lengths.
+	// Algorithm from RFC 1951, section 3.2.2.
+	var counts, nextVal [maxCodeLen + 1]uint32
+	for _, c := range codes {
+		counts[c.len]++
+	}
+	val := uint32(0)
+	counts[0] = 0
+	for len := 1; len <= maxCodeLen; len++ {
+		val = (val + counts[len-1]) << 1
+		nextVal[len] = val
+	}
+	for i, c := range codes {
+		if c.len != 0 {
+			codes[i].val = nextVal[c.len]
+			nextVal[c.len]++
+		}
+	}
 }
 
 // TODO: is a code for (byte) faster?
@@ -120,7 +170,7 @@ func (c *Code) code(s Symbol) bitcode {
 	return c.codes[s]
 }
 
-// TODO: return (int, []Symbol) so SplitFunc doesn't have to consume all its input.
+// TODO: return (int, []Symbol) so SplitFunc doCto consume all its input.
 type SplitFunc func([]byte) []Symbol
 
 type CodeBuilder struct {
@@ -165,7 +215,7 @@ func (cb *CodeBuilder) Code() (*Code, error) {
 	return NewCode(cb.freqs)
 }
 
-// An Encode encodes symbols with a [Code].
+// An Encoder encodes symbols with a [Code].
 type Encoder struct {
 	c     *Code
 	bw    *bitWriter
@@ -223,11 +273,52 @@ func (e *Encoder) Close() error {
 }
 
 // A Decoder decodes data encoded by an Encoder.
-type Decoder struct{}
+type Decoder struct {
+	table *table
+}
 
-func (c *Code) NewDecoder(encoded []byte) *Decoder { return nil }
+func (c *Code) NewDecoder() *Decoder {
+	// TODO: build the table once
+	return &Decoder{
+		table: buildTable(c.codes),
+	}
+}
 
-func (d *Decoder) DecodeBytes(buf []byte) (int, error) {
+// A table maps bytes to actions.
+// The index byte might represent a complete 8-bit code, or one that is shorter or longer.
+// If 8 or shorter, action.len gives the length in bits, telling the Decoder how much of
+// the byte to consume from the input. A new byte is then constructed from the remainder of the
+// old byte with additional input bits, and then the table is indexed again.
+//
+// If the code length exceeds 8 bits, the action points to another table, populated with values
+// using the code's remaining bits.
+type table [256]action
+
+type action struct {
+	sym   Symbol // the symbol that this code represents
+	len   uint32 // the length of the code
+	table *table // if non-nil, then sym==0, len==8, and the code continues to the next table
+}
+
+func buildTable(codes []bitcode) *table {
+	t := &table{}
+	for s, c := range codes {
+		t.add(c.val, c.len, Symbol(s))
+	}
+	return t
+}
+
+func (t *table) add(val, len uint32, sym Symbol) {
+	if len <= 8 {
+		for i := range 1 << (8 - len) {
+			t[int(val)+i] = action{sym: sym, len: len}
+		}
+	} else {
+		panic("unimp")
+	}
+}
+
+func (d *Decoder) Read(buf []byte) (int, error) {
 	return 0, nil
 
 }
