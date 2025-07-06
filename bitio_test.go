@@ -52,7 +52,7 @@ func testBitWriter(t *testing.T, bs []uint32, ns []int) {
 		if bs[i]&(^((1 << ns[i]) - 1)) != 0 {
 			t.Fatalf("bad value: %d does not fit int %d bits", bs[i], ns[i])
 		}
-		bw.WriteBits(bs[i], ns[i])
+		bw.writeBits(bs[i], ns[i])
 	}
 	if err := bw.Close(); err != nil {
 		t.Fatal(err)
@@ -70,7 +70,6 @@ func testBitWriter(t *testing.T, bs []uint32, ns []int) {
 	if got != want {
 		t.Errorf("\ngot  %s\nwant %s", got, want)
 	}
-
 }
 
 func bitstring(bs []uint32, ns []int) string {

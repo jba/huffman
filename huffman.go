@@ -2,6 +2,8 @@
 // Use of this source code is governed by a
 // license that can be found in the LICENSE file.
 
+// TODO:
+// Large zip (68M): github.com/vkcom/statshouse	v1.0.0-beta1.0.20250117104732-ffd3f62aa4c1
 package huffman
 
 import (
@@ -29,7 +31,7 @@ type bitcode struct {
 const maxCodeLen = 20
 
 // NewCode constructs a [Code] for symbols with the given frequencies.
-// The values at frequencies[i] is the frequency for Symbol(i).
+// The value at frequencies[i] is the frequency for Symbol(i).
 // If a frequency is 0, the corresponding symbol must not appear
 // in the input given to an [Encoder].
 func NewCode(frequencies []int) (*Code, error) {
@@ -170,19 +172,28 @@ func (c *Code) code(s Symbol) bitcode {
 	return c.codes[s]
 }
 
-// TODO: return (int, []Symbol) so SplitFunc doCto consume all its input.
+// A SplitFunc splits bytes into symbols.
+// TODO: return (int, []Symbol), where the int is how many bytes consumed, so SplitFunc
+// doesn't have to consume all its input.
 type SplitFunc func([]byte) []Symbol
 
+// A CodeBuilder builds A [Code] from a sequence of bytes.
+// Call [NewCodeBuilder] to construct one, then write the bytes to it with [CodeBuilder.Write].
+// Call [CodeBuilder.Code] to retrieve the finished Code.
 type CodeBuilder struct {
 	split SplitFunc
 	freqs []int
 }
 
+// NewCodeBuilder constructs a [CodeBuilder].
+// If split is nil, each byte of the input is a separate symbol.
+// Otherwise, split is called to split the input bytes into symbols.
 func NewCodeBuilder(split SplitFunc) *CodeBuilder {
 	return &CodeBuilder{split: split}
 }
 
-// Always returns a nil error.
+// Write adds the data to the sequence of symbols used to construct the [Code].
+// It always returns a nil error.
 func (cb *CodeBuilder) Write(data []byte) (int, error) {
 	if cb.split != nil {
 		syms := cb.split(data)
@@ -211,18 +222,22 @@ func (cb *CodeBuilder) growFreqs(n uint32) {
 	}
 }
 
+// Code returns the constructed [Code].
 func (cb *CodeBuilder) Code() (*Code, error) {
 	return NewCode(cb.freqs)
 }
 
-// An Encoder encodes symbols with a [Code].
+// An Encoder encodes symbols with a [Code] and writes them to an [io.Writer].
+// Create one with [NewEncoder], then add data with the Write, WriteBytes, WriteSymbol and WriteSymbols
+// methods. Finally, call Close to flush remaining data to the io.Writer.
 type Encoder struct {
 	c     *Code
 	bw    *bitWriter
 	split SplitFunc
 }
 
-// If there is no SplitFunc, it is an error if the Encoder's [Code] contains more than 256 symbols
+// NewEncoder constructs an [Encoder].
+// If split is nil, the [Code] must not have more than 256 symbols (one for each possible byte value).
 func (c *Code) NewEncoder(w io.Writer, split SplitFunc) *Encoder {
 	if split == nil && len(c.codes) > 256 {
 		panic("no split func but more than 256 codes")
@@ -243,12 +258,20 @@ func (e *Encoder) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
+// WriteBytes writes the bytes to the encoder as separate symbols.
+// The encoder's split function must be nil, and every byte in the argument
+// must have a valid encoding.
 func (e *Encoder) WriteBytes(bs []byte) {
+	if e.split != nil {
+		panic("huffman.Encoder.WriteBytes called with no split function")
+	}
 	for _, b := range bs {
 		e.WriteSymbol(Symbol(b))
 	}
 }
 
+// WriteSymbol writes a symbol to the encoder.
+// It panics if there is no code for the given symbol.
 func (e *Encoder) WriteSymbol(s Symbol) {
 	// TODO: faster to have a specialized bits(byte)?
 	b := e.c.code(s)
@@ -256,18 +279,17 @@ func (e *Encoder) WriteSymbol(s Symbol) {
 		panic(fmt.Sprintf("no code for symbol %d", s))
 	}
 	// TODO: benchmark if WriteBits takes a uint8, or bits.len is an int.
-	e.bw.WriteBits(b.val, int(b.len))
+	e.bw.writeBits(b.val, int(b.len))
 }
 
+// WriteSymbols calls [WriteSymbol] repeatedly.
 func (e *Encoder) WriteSymbols(syms []Symbol) {
 	for _, s := range syms {
 		e.WriteSymbol(s)
 	}
 }
 
-// TODO: rewrite
-// Bytes returns the encoded bytes constructed from the calls to the AddXXX methods,
-// along with the first error encountered while adding.
+// Close writes remaining data to the encoder's writer.
 func (e *Encoder) Close() error {
 	return e.bw.Close()
 }
@@ -320,7 +342,6 @@ func (t *table) add(val, len uint32, sym Symbol) {
 
 func (d *Decoder) Read(buf []byte) (int, error) {
 	return 0, nil
-
 }
 
 func (d *Decoder) DecodeSymbols(buf []Symbol) (int, error) { return 0, nil }

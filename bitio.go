@@ -10,16 +10,16 @@ import "io"
 
 // A bitWriter can write up to 32 bits at a time.
 // Full bytes are flushed to its contained [io.Writer].
-// When the bitWriter is flushed, the final byte is zero-padded.
 // Write errors are stored and reported by [bitWriter.Close]
 // or [bitWriter.Err].
 // If the bitWriter is flushed on a non-byte boundary, the last byte
-// is padded on the high side.
+// is zero-padded on the high side.
 type bitWriter struct {
 	err error
 	w   io.Writer
 	// bits is a buffer of unwritten bits.
-	// The low-order part is stored in reverse order: ... | byte 1 | byte 0 |.
+	// Only the low-order 32 bits are valid betwen calls to writeBits,
+	// and those bytes are stored in reverse order: ... | byte 1 | byte 0 |.
 	bits  uint64
 	nbits int // number of bits in bits; always <= 32
 }
@@ -28,15 +28,15 @@ func newBitWriter(w io.Writer) *bitWriter {
 	return &bitWriter{w: w}
 }
 
-// WriteBits assumes that b is an n-bit number; that is, that
-func (w *bitWriter) WriteBits(b uint32, n int) {
+// writeBits writes the n
+func (w *bitWriter) writeBits(b uint32, n int) {
 	if w.err != nil {
 		return
 	}
-	w.bits |= uint64(b) << w.nbits
-	w.nbits += n
-	if w.nbits > 32 {
-		var buf [4]byte
+	w.bits |= uint64(b) << w.nbits // w.bits = b concat w.bits
+	w.nbits += n                   // there are n more bits in w.bits
+	if w.nbits > 32 {              // if w.bits is too large
+		var buf [4]byte // write out the low-order part
 		buf[0] = byte(w.bits)
 		buf[1] = byte(w.bits >> 8)
 		buf[2] = byte(w.bits >> 16)
