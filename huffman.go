@@ -300,7 +300,7 @@ type Decoder struct {
 }
 
 func (c *Code) NewDecoder() *Decoder {
-	// TODO: build the table once
+	// TODO: build the table once, not once for each Decoder.
 	return &Decoder{
 		table: buildTable(c.codes),
 	}
@@ -327,6 +327,11 @@ func buildTable(codes []bitcode) *table {
 	for s, c := range codes {
 		t.add(c.val, c.len, Symbol(s))
 	}
+	for i, a := range t {
+		if a.len == 0 {
+			panic(fmt.Sprintf("table[%d] has zero action", i))
+		}
+	}
 	return t
 }
 
@@ -340,10 +345,26 @@ func (t *table) add(val, len uint32, sym Symbol) {
 	}
 }
 
-func (d *Decoder) Read(buf []byte) (int, error) {
-	return 0, nil
-}
+// n is # of bits
+// func (d *Decoder) Decode(bs []byte, n int) ([]Symbol, error) {
+// 	var syms []Symbol
+// 	var b byte
+// 	b = bs[0]
+// 	for n > 0 {
+// 		a := (*d.table)[b]
+// 		if a.table != nil {
+// 			panic("unimp")
+// 		} else {
+// 			syms = append(syms, a.sym)
+// 			b, bs := shift(b, bs, a.len)
+// 		}
+// 	}
+// }
 
-func (d *Decoder) DecodeSymbols(buf []Symbol) (int, error) { return 0, nil }
+// func (d *Decoder) DecodeSymbols(buf []Symbol) (int, error) { return 0, nil }
 
-func (d *Decoder) SetEncoded(e []byte) {}
+// func (d *Decoder) Read(buf []byte) (int, error) {
+// 	return 0, nil
+// }
+
+// func (d *Decoder) SetEncoded(e []byte) {}

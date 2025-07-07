@@ -7,6 +7,8 @@ package huffman
 import (
 	"bytes"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 )
@@ -40,26 +42,50 @@ func TestEncoder(t *testing.T) {
 }
 
 func TestEncodeDecode(t *testing.T) {
-	input := "a man a plan a canal panama"
-	cb := NewCodeBuilder(nil)
-	cb.Write([]byte(input))
-	code, err := cb.Code()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var buf bytes.Buffer
-	enc := code.NewEncoder(&buf, nil)
-	enc.Write([]byte(input))
-	if err := enc.Close(); err != nil {
-		t.Fatal(err)
-	}
-	// The code is canonical, so we can compare between runs.
-	want := "721af9d5c8a8cdab03"
-	gotBytes := buf.Bytes()
-	got := hex.EncodeToString(gotBytes)
-	if got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
+	t.Run("short", func(t *testing.T) {
+		input := "a man a plan a canal panama"
+		cb := NewCodeBuilder(nil)
+		cb.Write([]byte(input))
+		code, err := cb.Code()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		enc := code.NewEncoder(&buf, nil)
+		enc.Write([]byte(input))
+		if err := enc.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// The code is canonical, so we can compare between runs.
+		want := "721af9d5c8a8cdab03"
+		gotBytes := buf.Bytes()
+		got := hex.EncodeToString(gotBytes)
+		if got != want {
+			t.Errorf("got %s, want %s", got, want)
+		}
+
+		// dec := code.NewDecoder()
+
+		// TODO: decode
+	})
+	t.Run("pride bytes", func(t *testing.T) {
+		input, err := os.ReadFile(filepath.Join("testdata", "pride-and-prejudice.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cb := NewCodeBuilder(nil)
+		cb.Write([]byte(input))
+		code, err := cb.Code()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		enc := code.NewEncoder(&buf, nil)
+		enc.Write([]byte(input))
+		if err := enc.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestCodeMarshal(t *testing.T) {
@@ -101,7 +127,6 @@ func TestCodeMarshal(t *testing.T) {
 			if g, w := c.codes[i].len, dec.codes[i].len; g != w {
 				t.Errorf("#%d: %3d: %d != %d", tci, i, g, w)
 			}
-
 		}
 	}
 }

@@ -7,6 +7,7 @@ package huffman
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"slices"
 	"strings"
@@ -21,11 +22,11 @@ func TestWriteBits(t *testing.T) {
 		var ns [N]int
 		for i := range 32 {
 			ns[i] = i + 1
-			bs[i] = masklow(rand.Uint32(), ns[i])
+			bs[i] = lowOrderBits(rand.Uint32(), ns[i])
 		}
 		for i := range 32 {
 			ns[i+32] = i + 1
-			bs[i+32] = masklow(rand.Uint32(), ns[i+32])
+			bs[i+32] = lowOrderBits(rand.Uint32(), ns[i+32])
 		}
 		rand.Shuffle(N, func(i, j int) {
 			bs[i], bs[j] = bs[j], bs[i]
@@ -37,11 +38,6 @@ func TestWriteBits(t *testing.T) {
 
 	testBitWriter(t, []uint32{17, 1232323, 1 << 31}, []int{32, 32, 32})
 	testBitWriter(t, []uint32{0, 1, 1, 1, 0, 1}, []int{1, 1, 1, 1, 1, 1})
-}
-
-// preserve only the low-order n bits of u.
-func masklow(u uint32, n int) uint32 {
-	return u & ((uint32(1) << n) - 1)
 }
 
 func testBitWriter(t *testing.T, bs []uint32, ns []int) {
@@ -95,4 +91,67 @@ func bitstring(bs []uint32, ns []int) string {
 		bytes = append(bytes, s)
 	}
 	return strings.Join(bytes, ":")
+}
+
+func TestBitRead(t *testing.T) {
+	r := bytes.NewReader([]byte{1, 2, 3, 4, 5, 6})
+	br := newBitReader(r, 48)
+
+	checkBits := func(wantNbits int, wantBits uint64) {
+		t.Helper()
+		if br.err != nil {
+			t.Fatal(br.err)
+		}
+		if g := br.nbits; g != wantNbits {
+			t.Fatalf("got %d, want %d", g, wantNbits)
+		}
+		if g := br.bits; g != wantBits {
+			t.Errorf("got %x, want %x", g, wantBits)
+		}
+	}
+
+	checkRead := func(n int, want byte) {
+		t.Helper()
+		got, err := br.readBits(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %d, want %d", got, want)
+		}
+	}
+
+	checkBits(32, 0x04030201)
+	g, err := br.peek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g != 1 {
+		t.Errorf("got %d, want 1", g)
+	}
+
+	for i := range 6 {
+		checkRead(8, byte(i+1))
+	}
+	if _, err := br.readBits(1); err != io.ErrUnexpectedEOF {
+		t.Fatalf("got %v, want unexpected EOF", err)
+	}
+
+	br = newBitReader(bytes.NewReader([]byte{1, 2, 3, 4, 5, 6}), 48)
+
+	for i := range 6 {
+		checkRead(4, byte(i+1))
+		checkRead(4, 0)
+	}
+	if _, err := br.readBits(1); err != io.ErrUnexpectedEOF {
+		t.Fatalf("got %v, want unexpected EOF", err)
+	}
+
+	br = newBitReader(bytes.NewReader([]byte{1, 2, 3, 4, 5, 6}), 48)
+	checkRead(3, 1)
+	checkRead(2, 0)
+	checkRead(3, 0)
+	checkRead(2, 2)
+	checkRead(5, 0)
+	checkRead(3, 3)
 }

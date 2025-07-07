@@ -1,0 +1,8 @@
+Understand why the bit reader behaves as it does: The last checkRead in the test fails: why?
+
+Make sure the bit writer and reader work properly together.
+
+Use bit reader peek and readBits to implement decoding.
+
+write a round trip test for the testdata file.
+
