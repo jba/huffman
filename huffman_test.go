@@ -245,6 +245,60 @@ func testRoundTrip(t *testing.T, input []byte, split SplitFunc) {
 	}
 }
 
+func FuzzRoundTrip(f *testing.F) {
+	// Seed corpus.
+	f.Add([]byte("a man a plan a canal panama"))
+	f.Add([]byte("aaabbb"))
+	f.Add(bytes.Repeat([]byte("x"), 100))
+	f.Add([]byte{0, 1, 2, 3, 4, 5})
+	f.Add([]byte{0xff, 0x00, 0xff, 0x00})
+
+	f.Fuzz(func(t *testing.T, input []byte) {
+		if len(input) == 0 {
+			return
+		}
+
+		// Build code from the input itself.
+		cb := NewCodeBuilder(nil)
+		cb.Write(input)
+		code, err := cb.Code()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Encode.
+		var buf bytes.Buffer
+		enc := code.NewEncoder(&buf, nil)
+		enc.Write(input)
+		if err := enc.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		// Compute total encoded bits.
+		totalBits := 0
+		for _, b := range input {
+			totalBits += int(code.codes[Symbol(b)].len)
+		}
+
+		// Decode.
+		dec := code.NewDecoder()
+		symbols, err := dec.Decode(buf.Bytes(), totalBits)
+		if err != nil {
+			t.Fatalf("Decode error: %v", err)
+		}
+
+		// Compare.
+		if len(symbols) != len(input) {
+			t.Fatalf("length mismatch: decoded %d symbols, want %d", len(symbols), len(input))
+		}
+		for i, s := range symbols {
+			if byte(s) != input[i] {
+				t.Fatalf("mismatch at index %d: got %d, want %d", i, s, input[i])
+			}
+		}
+	})
+}
+
 func TestAssignValues(t *testing.T) {
 	// Example from RFC 1951, section 3.2.2.
 	codes := []bitcode{{0, 2}, {0, 1}, {0, 3}, {0, 3}}
