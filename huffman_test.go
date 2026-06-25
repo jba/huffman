@@ -236,10 +236,7 @@ func testRoundTrip(t *testing.T, input []byte, split SplitFunc) {
 		gotBytes[i] = byte(s)
 	}
 	if !bytes.Equal(gotBytes, input) {
-		max := 100
-		if len(input) < max {
-			max = len(input)
-		}
+		max := min(len(input), 100)
 		t.Errorf("round trip failed: got %d bytes, want %d bytes\n  got[:100]  %q\n  want[:100] %q",
 			len(gotBytes), len(input), gotBytes[:max], input[:max])
 	}

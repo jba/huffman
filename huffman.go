@@ -378,10 +378,7 @@ func (d *Decoder) Decode(bs []byte, nbits int) ([]Symbol, error) {
 			// Code is longer than 8 bits. Consume the first 8 bits,
 			// then peek again and look up in the sub-table.
 			for n := 8; n > 0; {
-				chunk := n
-				if chunk > 8 {
-					chunk = 8
-				}
+				chunk := min(n, 8)
 				if _, err := br.readBits(chunk); err != nil {
 					return syms, err
 				}
@@ -403,10 +400,7 @@ func (d *Decoder) Decode(bs []byte, nbits int) ([]Symbol, error) {
 		n := codeLen
 		// Read those bits to advance the reader.
 		for n > 0 {
-			chunk := n
-			if chunk > 8 {
-				chunk = 8
-			}
+			chunk := min(n, 8)
 			if _, err := br.readBits(chunk); err != nil {
 				return syms, err
 			}
