@@ -245,6 +245,65 @@ func testRoundTrip(t *testing.T, input []byte, split SplitFunc) {
 	}
 }
 
+func TestRoundTripLargeAlphabet(t *testing.T) {
+	const numSymbols = 2000
+
+	// Build frequencies: symbol i has frequency i+1, giving a skewed distribution.
+	freqs := make([]int, numSymbols)
+	for i := range freqs {
+		freqs[i] = i + 1
+	}
+	code, err := NewCode(freqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a test sequence using all 2000 symbols, repeated with varying patterns.
+	var symbols []Symbol
+	for i := range numSymbols {
+		symbols = append(symbols, Symbol(i))
+	}
+	// Append a longer run weighted toward high-frequency symbols.
+	for i := range 5000 {
+		symbols = append(symbols, Symbol(i%numSymbols))
+	}
+
+	// Compute total encoded bits.
+	totalBits := 0
+	for _, s := range symbols {
+		totalBits += int(code.codes[s].len)
+	}
+
+	// Encode using WriteSymbols (required for >256-symbol alphabets without a SplitFunc).
+	var buf bytes.Buffer
+	enc := code.NewEncoder(&buf, func(b []byte) []Symbol { return nil }) // dummy split
+	enc.WriteSymbols(symbols)
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("%d symbols, %d distinct, %d encoded bits (%d bytes)",
+		len(symbols), numSymbols, totalBits, buf.Len())
+
+	// Decode.
+	dec := code.NewDecoder()
+	got, err := dec.Decode(buf.Bytes(), totalBits)
+	if err != nil {
+		t.Fatalf("Decode error: %v", err)
+	}
+	if !slices.Equal(got, symbols) {
+		mismatch := -1
+		for i := range min(len(got), len(symbols)) {
+			if got[i] != symbols[i] {
+				mismatch = i
+				break
+			}
+		}
+		t.Fatalf("round trip failed: got %d symbols, want %d; first mismatch at index %d",
+			len(got), len(symbols), mismatch)
+	}
+}
+
 func FuzzRoundTrip(f *testing.F) {
 	// Seed corpus.
 	f.Add([]byte("a man a plan a canal panama"))

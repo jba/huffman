@@ -226,17 +226,16 @@ func (h *huffmanEncoder) assignEncodingAndSize(bitCount []int32, list []literalN
 	}
 }
 
-const maxNumLit = 286
-
 // Update this Huffman Code object to be the minimum code for the specified frequency count.
 //
 // freq is an array of frequencies, in which freq[i] gives the frequency of literal i.
 // maxBits  The maximum number of bits to use for any literal.
 func (h *huffmanEncoder) generate(freq []int32, maxBits int32) {
-	if h.freqcache == nil {
-		h.freqcache = make([]literalNode, maxNumLit+1)
+	n := len(freq) + 1
+	if len(h.freqcache) < n {
+		h.freqcache = make([]literalNode, n)
 	}
-	list := h.freqcache[:len(freq)+1]
+	list := h.freqcache[:n]
 	// Number of non-zero literals
 	count := 0
 	// Set list to be the set of all non-zero literals and their frequencies
