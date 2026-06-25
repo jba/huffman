@@ -7,6 +7,7 @@
 package huffman
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -325,46 +326,93 @@ type action struct {
 func buildTable(codes []bitcode) *table {
 	t := &table{}
 	for s, c := range codes {
-		t.add(c.val, c.len, Symbol(s))
-	}
-	for i, a := range t {
-		if a.len == 0 {
-			panic(fmt.Sprintf("table[%d] has zero action", i))
+		if c.len == 0 {
+			continue // symbol has no code (zero frequency)
 		}
+		t.add(c.val, c.len, Symbol(s))
 	}
 	return t
 }
 
 func (t *table) add(val, len uint32, sym Symbol) {
 	if len <= 8 {
+		// val occupies the low `len` bits. Fill all entries where those
+		// low bits match val and the upper (8-len) bits are anything.
 		for i := range 1 << (8 - len) {
-			t[int(val)+i] = action{sym: sym, len: len}
+			idx := (uint32(i) << len) | val
+			t[idx] = action{sym: sym, len: len}
 		}
 	} else {
-		panic("unimp")
+		// Code is longer than 8 bits. The low 8 bits index this table;
+		// the remaining bits index a sub-table.
+		idx := val & 0xFF
+		a := &t[idx]
+		if a.table == nil {
+			a.table = &table{}
+			a.len = 8
+		}
+		a.table.add(val>>8, len-8, sym)
 	}
 }
 
-// n is # of bits
-// func (d *Decoder) Decode(bs []byte, n int) ([]Symbol, error) {
-// 	var syms []Symbol
-// 	var b byte
-// 	b = bs[0]
-// 	for n > 0 {
-// 		a := (*d.table)[b]
-// 		if a.table != nil {
-// 			panic("unimp")
-// 		} else {
-// 			syms = append(syms, a.sym)
-// 			b, bs := shift(b, bs, a.len)
-// 		}
-// 	}
-// }
-
-// func (d *Decoder) DecodeSymbols(buf []Symbol) (int, error) { return 0, nil }
-
-// func (d *Decoder) Read(buf []byte) (int, error) {
-// 	return 0, nil
-// }
-
-// func (d *Decoder) SetEncoded(e []byte) {}
+// Decode decodes nbits of encoded data from bs into symbols.
+// It returns the decoded symbols, or an error.
+func (d *Decoder) Decode(bs []byte, nbits int) ([]Symbol, error) {
+	if nbits <= 0 {
+		return nil, nil
+	}
+	br := newBitReader(bytes.NewReader(bs), nbits)
+	var syms []Symbol
+	for nbits > 0 {
+		// Peek at the next 8 bits (or fewer at the end).
+		b, err := br.peek()
+		if err != nil {
+			return syms, err
+		}
+		a := d.table[b]
+		if a.len == 0 {
+			return syms, fmt.Errorf("huffman.Decode: invalid code at byte 0x%02x", b)
+		}
+		codeLen := int(a.len)
+		if a.table != nil {
+			// Code is longer than 8 bits. Consume the first 8 bits,
+			// then peek again and look up in the sub-table.
+			for n := 8; n > 0; {
+				chunk := n
+				if chunk > 8 {
+					chunk = 8
+				}
+				if _, err := br.readBits(chunk); err != nil {
+					return syms, err
+				}
+				n -= chunk
+			}
+			nbits -= 8
+			b, err = br.peek()
+			if err != nil {
+				return syms, err
+			}
+			a = a.table[b]
+			if a.len == 0 {
+				return syms, fmt.Errorf("huffman.Decode: invalid code in sub-table at byte 0x%02x", b)
+			}
+			codeLen = int(a.len)
+		}
+		syms = append(syms, a.sym)
+		// Consume a.len bits.
+		n := codeLen
+		// Read those bits to advance the reader.
+		for n > 0 {
+			chunk := n
+			if chunk > 8 {
+				chunk = 8
+			}
+			if _, err := br.readBits(chunk); err != nil {
+				return syms, err
+			}
+			n -= chunk
+		}
+		nbits -= int(a.len)
+	}
+	return syms, nil
+}

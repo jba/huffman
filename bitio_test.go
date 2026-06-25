@@ -153,5 +153,5 @@ func TestBitRead(t *testing.T) {
 	checkRead(3, 0)
 	checkRead(2, 2)
 	checkRead(5, 0)
-	checkRead(3, 3)
+	checkRead(3, 6)
 }

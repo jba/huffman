@@ -115,7 +115,7 @@ func (r *bitReader) fill() {
 	// Put the n bytes of buf into a uint32, as byte[3] | byte[2] | byte[1] | byte[0].
 	u := (uint32(buf[3]) << 24) | (uint32(buf[2]) << 16) | (uint32(buf[1]) << 8) | uint32(buf[0])
 	// Put those bytes into r.bits just above its current contents.
-	r.bits = uint64(u<<r.nbits) | uint64(lowOrderBits(r.bits, r.nbits))
+	r.bits = (uint64(u) << r.nbits) | uint64(lowOrderBits(r.bits, r.nbits))
 	r.nbits = min(r.nbits+n*8, r.remaining)
 }
 
@@ -151,8 +151,15 @@ func (r *bitReader) peek() (byte, error) {
 	if r.err != nil {
 		return 0, r.err
 	}
-	if r.nbits == 0 {
-		return 0, io.EOF
+	if r.nbits < 8 {
+		r.fill()
+		if r.err != nil {
+			if r.nbits == 0 {
+				return 0, r.err
+			}
+			// Clear the error; we still have bits to return.
+			r.err = nil
+		}
 	}
 	return byte(lowOrderBits(r.bits, 8)), nil
 }

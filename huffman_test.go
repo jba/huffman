@@ -131,6 +131,120 @@ func TestCodeMarshal(t *testing.T) {
 	}
 }
 
+func TestRoundTrip(t *testing.T) {
+	t.Run("short_string", func(t *testing.T) {
+		input := "a man a plan a canal panama"
+		testRoundTrip(t, []byte(input), nil)
+	})
+
+	t.Run("all_bytes", func(t *testing.T) {
+		// Every byte value appears at least once.
+		var input []byte
+		for i := range 256 {
+			for range i + 1 { // varying frequencies
+				input = append(input, byte(i))
+			}
+		}
+		testRoundTrip(t, input, nil)
+	})
+
+	t.Run("single_char", func(t *testing.T) {
+		input := bytes.Repeat([]byte("x"), 100)
+		testRoundTrip(t, input, nil)
+	})
+
+	t.Run("two_chars", func(t *testing.T) {
+		testRoundTrip(t, []byte("aaabbb"), nil)
+	})
+
+	t.Run("pride_and_prejudice", func(t *testing.T) {
+		input, err := os.ReadFile(filepath.Join("testdata", "pride-and-prejudice.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		testRoundTrip(t, input, nil)
+	})
+
+	t.Run("explicit_frequencies", func(t *testing.T) {
+		// Build code from explicit frequencies, encode symbols, decode, compare.
+		freqs := []int{5, 9, 12, 13, 16, 45}
+		code, err := NewCode(freqs)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		symbols := []Symbol{0, 1, 2, 3, 4, 5, 5, 5, 4, 3, 2, 1, 0}
+
+		// Compute total encoded bits.
+		totalBits := 0
+		for _, s := range symbols {
+			totalBits += int(code.codes[s].len)
+		}
+
+		var buf bytes.Buffer
+		enc := code.NewEncoder(&buf, nil)
+		enc.WriteSymbols(symbols)
+		if err := enc.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		dec := code.NewDecoder()
+		got, err := dec.Decode(buf.Bytes(), totalBits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(got, symbols) {
+			t.Errorf("round trip failed:\n  got  %v\n  want %v", got, symbols)
+		}
+	})
+}
+
+func testRoundTrip(t *testing.T, input []byte, split SplitFunc) {
+	t.Helper()
+
+	cb := NewCodeBuilder(split)
+	cb.Write(input)
+	code, err := cb.Code()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Encode.
+	var buf bytes.Buffer
+	enc := code.NewEncoder(&buf, split)
+	enc.Write(input)
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Compute total encoded bits.
+	totalBits := 0
+	for _, b := range input {
+		totalBits += int(code.codes[Symbol(b)].len)
+	}
+
+	// Decode.
+	dec := code.NewDecoder()
+	symbols, err := dec.Decode(buf.Bytes(), totalBits)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Convert symbols back to bytes and compare.
+	gotBytes := make([]byte, len(symbols))
+	for i, s := range symbols {
+		gotBytes[i] = byte(s)
+	}
+	if !bytes.Equal(gotBytes, input) {
+		max := 100
+		if len(input) < max {
+			max = len(input)
+		}
+		t.Errorf("round trip failed: got %d bytes, want %d bytes\n  got[:100]  %q\n  want[:100] %q",
+			len(gotBytes), len(input), gotBytes[:max], input[:max])
+	}
+}
+
 func TestAssignValues(t *testing.T) {
 	// Example from RFC 1951, section 3.2.2.
 	codes := []bitcode{{0, 2}, {0, 1}, {0, 3}, {0, 3}}
