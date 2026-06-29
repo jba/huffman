@@ -15,8 +15,9 @@ import "io"
 // If the bitWriter is flushed on a non-byte boundary, the last byte
 // is zero-padded on the high side.
 type bitWriter struct {
-	err error
-	w   io.Writer
+	err     error
+	w       io.Writer
+	written bool // true if any bits have been written
 	// bits is a buffer of unwritten bits.
 	// Only the low-order 32 bits are valid between calls to writeBits,
 	// and those bytes are stored in reverse order: byte 3 | byte 2 | byte 1 | byte 0.
@@ -28,11 +29,12 @@ func newBitWriter(w io.Writer) *bitWriter {
 	return &bitWriter{w: w}
 }
 
-// writeBits writes the n
+// writeBits writes the n low-order bits of b.
 func (w *bitWriter) writeBits(b uint32, n int) {
 	if w.err != nil {
 		return
 	}
+	w.written = true
 	w.bits |= uint64(b) << w.nbits // w.bits = b concat w.bits
 	w.nbits += n                   // there are n more bits in w.bits
 	if w.nbits > 32 {              // if w.bits is too large
@@ -48,7 +50,19 @@ func (w *bitWriter) writeBits(b uint32, n int) {
 }
 
 func (w *bitWriter) Close() error {
+	// Flush remaining bits, then write a trailer byte indicating
+	// how many bits in the last data byte are valid (1-8), or 0
+	// if no data was written.
+	validBits := byte(0)
+	if w.written || w.nbits > 0 {
+		if w.nbits == 0 {
+			validBits = 8
+		} else {
+			validBits = byte((w.nbits-1)%8 + 1)
+		}
+	}
 	w.flush()
+	w.write([]byte{validBits})
 	return w.err
 }
 
@@ -81,7 +95,7 @@ func (w *bitWriter) Err() error {
 type bitReader struct {
 	err       error
 	r         io.Reader
-	remaining int // number of bits left to read
+	remaining int // number of valid bits left to read
 	// bits is a buffer of unread bits.
 	// Only the low-order 32 bits are valid between calls to readBits,
 	// and those bytes are stored in reverse order: byte 3 | byte 2 | byte 1 | byte 0.

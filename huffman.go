@@ -357,13 +357,22 @@ func (t *table) add(val, len uint32, sym Symbol) {
 	}
 }
 
-// Decode decodes nbits of encoded data from bs into symbols.
-// It returns the decoded symbols, or an error.
-func (d *Decoder) Decode(bs []byte, nbits int) ([]Symbol, error) {
-	if nbits <= 0 {
+// Decode decodes encoded data from bs into symbols.
+// bs must have been produced by an [Encoder]; the last byte is a trailer
+// indicating how many bits in the preceding byte are valid.
+func (d *Decoder) Decode(bs []byte) ([]Symbol, error) {
+	if len(bs) == 0 {
+		return nil, errors.New("huffman.Decode: empty input")
+	}
+	trailer := int(bs[len(bs)-1])
+	data := bs[:len(bs)-1]
+	if len(data) == 0 {
+		// Trailer only, no data.
 		return nil, nil
 	}
-	br := newBitReader(bytes.NewReader(bs), nbits)
+	// Total valid bits: all full bytes except the last, plus the trailer value.
+	nbits := (len(data)-1)*8 + trailer
+	br := newBitReader(bytes.NewReader(data), nbits)
 	var syms []Symbol
 	for nbits > 0 {
 		// Peek at the next 8 bits (or fewer at the end).

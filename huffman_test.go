@@ -34,8 +34,10 @@ func TestEncoder(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.Bytes()
-	if !bytes.Equal(got, data) {
-		t.Errorf("got %v, want %v", got, data)
+	// Expect data bytes plus trailer byte (8 = all bits valid in last byte).
+	want := append(append([]byte{}, data...), 8)
+	if !bytes.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 
 	// TODO: test Encoder with splitfunc.
@@ -57,7 +59,8 @@ func TestEncodeDecode(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The code is canonical, so we can compare between runs.
-		want := "721af9d5c8a8cdab03"
+		// Trailer byte 0x04: last data byte has 4 valid bits.
+		want := "721af9d5c8a8cdab0304"
 		gotBytes := buf.Bytes()
 		got := hex.EncodeToString(gotBytes)
 		if got != want {
@@ -175,12 +178,6 @@ func TestRoundTrip(t *testing.T) {
 
 		symbols := []Symbol{0, 1, 2, 3, 4, 5, 5, 5, 4, 3, 2, 1, 0}
 
-		// Compute total encoded bits.
-		totalBits := 0
-		for _, s := range symbols {
-			totalBits += int(code.codes[s].len)
-		}
-
 		var buf bytes.Buffer
 		enc := code.NewEncoder(&buf, nil)
 		enc.WriteSymbols(symbols)
@@ -189,7 +186,7 @@ func TestRoundTrip(t *testing.T) {
 		}
 
 		dec := code.NewDecoder()
-		got, err := dec.Decode(buf.Bytes(), totalBits)
+		got, err := dec.Decode(buf.Bytes())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -217,15 +214,9 @@ func testRoundTrip(t *testing.T, input []byte, split SplitFunc) {
 		t.Fatal(err)
 	}
 
-	// Compute total encoded bits.
-	totalBits := 0
-	for _, b := range input {
-		totalBits += int(code.codes[Symbol(b)].len)
-	}
-
 	// Decode.
 	dec := code.NewDecoder()
-	symbols, err := dec.Decode(buf.Bytes(), totalBits)
+	symbols, err := dec.Decode(buf.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,12 +360,8 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 			}
 
 			// Decode with the restored code.
-			totalBits := 0
-			for _, b := range data {
-				totalBits += int(restoredCode.codes[Symbol(b)].len)
-			}
 			dec := restoredCode.NewDecoder()
-			symbols, err := dec.Decode(restoredBuf.Bytes(), totalBits)
+			symbols, err := dec.Decode(restoredBuf.Bytes())
 			if err != nil {
 				t.Fatalf("Decode: %v", err)
 			}
@@ -421,12 +408,6 @@ func TestRoundTripLargeAlphabet(t *testing.T) {
 		symbols = append(symbols, Symbol(i%numSymbols))
 	}
 
-	// Compute total encoded bits.
-	totalBits := 0
-	for _, s := range symbols {
-		totalBits += int(code.codes[s].len)
-	}
-
 	// Encode using WriteSymbols (required for >256-symbol alphabets without a SplitFunc).
 	var buf bytes.Buffer
 	enc := code.NewEncoder(&buf, func(b []byte) []Symbol { return nil }) // dummy split
@@ -435,12 +416,12 @@ func TestRoundTripLargeAlphabet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Logf("%d symbols, %d distinct, %d encoded bits (%d bytes)",
-		len(symbols), numSymbols, totalBits, buf.Len())
+	t.Logf("%d symbols, %d distinct, %d encoded bytes",
+		len(symbols), numSymbols, buf.Len())
 
 	// Decode.
 	dec := code.NewDecoder()
-	got, err := dec.Decode(buf.Bytes(), totalBits)
+	got, err := dec.Decode(buf.Bytes())
 	if err != nil {
 		t.Fatalf("Decode error: %v", err)
 	}
@@ -486,15 +467,9 @@ func FuzzRoundTrip(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		// Compute total encoded bits.
-		totalBits := 0
-		for _, b := range input {
-			totalBits += int(code.codes[Symbol(b)].len)
-		}
-
 		// Decode.
 		dec := code.NewDecoder()
-		symbols, err := dec.Decode(buf.Bytes(), totalBits)
+		symbols, err := dec.Decode(buf.Bytes())
 		if err != nil {
 			t.Fatalf("Decode error: %v", err)
 		}

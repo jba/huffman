@@ -54,8 +54,13 @@ func testBitWriter(t *testing.T, bs []uint32, ns []int) {
 		t.Fatal(err)
 	}
 	gotb := buf.Bytes()
+	if len(gotb) == 0 {
+		t.Fatal("no output")
+	}
+	// Last byte is the trailer; strip it for the data comparison.
+	data := gotb[:len(gotb)-1]
 	var sb strings.Builder
-	for i, b := range gotb {
+	for i, b := range data {
 		if i > 0 {
 			sb.WriteByte(':')
 		}
