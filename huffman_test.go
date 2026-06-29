@@ -242,6 +242,162 @@ func testRoundTrip(t *testing.T, input []byte, split SplitFunc) {
 	}
 }
 
+func TestMarshalUnmarshalRoundTrip(t *testing.T) {
+	// Test that Marshal -> UnmarshalCode produces a Code that
+	// encodes and decodes identically to the original.
+
+	tests := []struct {
+		name  string
+		input func() ([]byte, *Code)
+	}{
+		{
+			name: "short_string",
+			input: func() ([]byte, *Code) {
+				data := []byte("a man a plan a canal panama")
+				cb := NewCodeBuilder(nil)
+				cb.Write(data)
+				code, _ := cb.Code()
+				return data, code
+			},
+		},
+		{
+			name: "all_byte_values",
+			input: func() ([]byte, *Code) {
+				var data []byte
+				for i := range 256 {
+					for range i + 1 {
+						data = append(data, byte(i))
+					}
+				}
+				cb := NewCodeBuilder(nil)
+				cb.Write(data)
+				code, _ := cb.Code()
+				return data, code
+			},
+		},
+		{
+			name: "two_symbols",
+			input: func() ([]byte, *Code) {
+				data := []byte("aaabbb")
+				cb := NewCodeBuilder(nil)
+				cb.Write(data)
+				code, _ := cb.Code()
+				return data, code
+			},
+		},
+		{
+			name: "single_symbol",
+			input: func() ([]byte, *Code) {
+				data := bytes.Repeat([]byte("z"), 50)
+				cb := NewCodeBuilder(nil)
+				cb.Write(data)
+				code, _ := cb.Code()
+				return data, code
+			},
+		},
+		{
+			name: "from_frequencies",
+			input: func() ([]byte, *Code) {
+				freqs := []int{5, 9, 12, 13, 16, 45}
+				code, _ := NewCode(freqs)
+				// Build data using only valid symbols.
+				var data []byte
+				for i, f := range freqs {
+					for range f {
+						data = append(data, byte(i))
+					}
+				}
+				return data, code
+			},
+		},
+		{
+			name: "pride_and_prejudice",
+			input: func() ([]byte, *Code) {
+				data, err := os.ReadFile(filepath.Join("testdata", "pride-and-prejudice.txt"))
+				if err != nil {
+					panic(err)
+				}
+				cb := NewCodeBuilder(nil)
+				cb.Write(data)
+				code, _ := cb.Code()
+				return data, code
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			data, origCode := tc.input()
+
+			// Marshal and unmarshal.
+			marshaled := origCode.Marshal()
+			restoredCode, err := UnmarshalCode(marshaled)
+			if err != nil {
+				t.Fatalf("UnmarshalCode: %v", err)
+			}
+
+			// Verify code lengths match.
+			if len(origCode.codes) != len(restoredCode.codes) {
+				t.Fatalf("code count: got %d, want %d", len(restoredCode.codes), len(origCode.codes))
+			}
+			for i := range origCode.codes {
+				if origCode.codes[i].len != restoredCode.codes[i].len {
+					t.Errorf("code[%d] len: got %d, want %d", i, restoredCode.codes[i].len, origCode.codes[i].len)
+				}
+				if origCode.codes[i].val != restoredCode.codes[i].val {
+					t.Errorf("code[%d] val: got %d, want %d", i, restoredCode.codes[i].val, origCode.codes[i].val)
+				}
+			}
+
+			// Encode with the original code.
+			var origBuf bytes.Buffer
+			enc := origCode.NewEncoder(&origBuf, nil)
+			enc.Write(data)
+			if err := enc.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			// Encode with the restored code — must produce identical output.
+			var restoredBuf bytes.Buffer
+			enc2 := restoredCode.NewEncoder(&restoredBuf, nil)
+			enc2.Write(data)
+			if err := enc2.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(origBuf.Bytes(), restoredBuf.Bytes()) {
+				t.Fatal("encoded output differs between original and unmarshaled code")
+			}
+
+			// Decode with the restored code.
+			totalBits := 0
+			for _, b := range data {
+				totalBits += int(restoredCode.codes[Symbol(b)].len)
+			}
+			dec := restoredCode.NewDecoder()
+			symbols, err := dec.Decode(restoredBuf.Bytes(), totalBits)
+			if err != nil {
+				t.Fatalf("Decode: %v", err)
+			}
+			gotBytes := make([]byte, len(symbols))
+			for i, s := range symbols {
+				gotBytes[i] = byte(s)
+			}
+			if !bytes.Equal(gotBytes, data) {
+				t.Fatalf("round trip through marshal/unmarshal failed: got %d bytes, want %d",
+					len(gotBytes), len(data))
+			}
+
+			// Double-marshal must be stable.
+			marshaled2 := restoredCode.Marshal()
+			if !bytes.Equal(marshaled, marshaled2) {
+				t.Fatal("marshal is not idempotent")
+			}
+
+			t.Logf("data=%d bytes, marshaled code=%d bytes", len(data), len(marshaled))
+		})
+	}
+}
+
 func TestRoundTripLargeAlphabet(t *testing.T) {
 	const numSymbols = 2000
 
@@ -358,7 +514,7 @@ func FuzzRoundTrip(f *testing.F) {
 func TestAssignValues(t *testing.T) {
 	// Example from RFC 1951, section 3.2.2.
 	codes := []bitcode{{0, 2}, {0, 1}, {0, 3}, {0, 3}}
-	want := []bitcode{{2, 2}, {0, 1}, {6, 3}, {7, 3}}
+	want := []bitcode{{1, 2}, {0, 1}, {3, 3}, {7, 3}}
 	assignValues(codes)
 	if !slices.Equal(codes, want) {
 		t.Errorf("got %v, want %v", codes, want)

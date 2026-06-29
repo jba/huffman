@@ -4,6 +4,8 @@
 
 // TODO:
 // Large zip (68M): github.com/vkcom/statshouse	v1.0.0-beta1.0.20250117104732-ffd3f62aa4c1
+
+// Package huffman implements Huffman coding.
 package huffman
 
 import (
@@ -158,7 +160,7 @@ func assignValues(codes []bitcode) {
 	}
 	for i, c := range codes {
 		if c.len != 0 {
-			codes[i].val = nextVal[c.len]
+			codes[i].val = uint32(reverseBits(uint16(nextVal[c.len]), byte(c.len)))
 			nextVal[c.len]++
 		}
 	}
