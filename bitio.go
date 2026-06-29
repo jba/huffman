@@ -125,13 +125,8 @@ func newBitReader(r io.Reader) *bitReader {
 	}
 	if err == io.EOF {
 		br.atEOF = true
-		if br.hasAhead {
-			// The only byte is the trailer. No data.
-			br.remaining = 0
-			br.hasAhead = false
-		} else {
-			br.remaining = 0
-		}
+		br.remaining = 0
+		br.hasAhead = false // if set, the only byte was the trailer
 	} else if err != nil {
 		br.err = err
 		return br
@@ -175,10 +170,7 @@ func (r *bitReader) fill() {
 	if na == 0 {
 		if isEOF {
 			r.atEOF = true
-			// No lookahead, no new bytes. Everything was already loaded.
-			if r.remaining < 0 {
-				r.remaining = r.nbits
-			}
+			r.remaining = r.nbits
 		}
 		return
 	}
