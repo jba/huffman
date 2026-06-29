@@ -186,7 +186,7 @@ func TestRoundTrip(t *testing.T) {
 		}
 
 		dec := code.NewDecoder()
-		got, err := dec.Decode(buf.Bytes())
+		got, err := dec.Decode(&buf)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -216,7 +216,7 @@ func testRoundTrip(t *testing.T, input []byte, split SplitFunc) {
 
 	// Decode.
 	dec := code.NewDecoder()
-	symbols, err := dec.Decode(buf.Bytes())
+	symbols, err := dec.Decode(&buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 
 			// Decode with the restored code.
 			dec := restoredCode.NewDecoder()
-			symbols, err := dec.Decode(restoredBuf.Bytes())
+			symbols, err := dec.Decode(&restoredBuf)
 			if err != nil {
 				t.Fatalf("Decode: %v", err)
 			}
@@ -421,7 +421,7 @@ func TestRoundTripLargeAlphabet(t *testing.T) {
 
 	// Decode.
 	dec := code.NewDecoder()
-	got, err := dec.Decode(buf.Bytes())
+	got, err := dec.Decode(&buf)
 	if err != nil {
 		t.Fatalf("Decode error: %v", err)
 	}
@@ -469,7 +469,7 @@ func FuzzRoundTrip(f *testing.F) {
 
 		// Decode.
 		dec := code.NewDecoder()
-		symbols, err := dec.Decode(buf.Bytes())
+		symbols, err := dec.Decode(&buf)
 		if err != nil {
 			t.Fatalf("Decode error: %v", err)
 		}

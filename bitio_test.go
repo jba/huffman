@@ -99,21 +99,9 @@ func bitstring(bs []uint32, ns []int) string {
 }
 
 func TestBitRead(t *testing.T) {
-	r := bytes.NewReader([]byte{1, 2, 3, 4, 5, 6})
-	br := newBitReader(r, 48)
-
-	checkBits := func(wantNbits int, wantBits uint64) {
-		t.Helper()
-		if br.err != nil {
-			t.Fatal(br.err)
-		}
-		if g := br.nbits; g != wantNbits {
-			t.Fatalf("got %d, want %d", g, wantNbits)
-		}
-		if g := br.bits; g != wantBits {
-			t.Errorf("got %x, want %x", g, wantBits)
-		}
-	}
+	// Data bytes {1..6} with trailer byte 8 (all bits valid in last byte).
+	r := bytes.NewReader([]byte{1, 2, 3, 4, 5, 6, 8})
+	br := newBitReader(r)
 
 	checkRead := func(n int, want byte) {
 		t.Helper()
@@ -126,7 +114,6 @@ func TestBitRead(t *testing.T) {
 		}
 	}
 
-	checkBits(32, 0x04030201)
 	g, err := br.peek()
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +129,7 @@ func TestBitRead(t *testing.T) {
 		t.Fatalf("got %v, want unexpected EOF", err)
 	}
 
-	br = newBitReader(bytes.NewReader([]byte{1, 2, 3, 4, 5, 6}), 48)
+	br = newBitReader(bytes.NewReader([]byte{1, 2, 3, 4, 5, 6, 8}))
 
 	for i := range 6 {
 		checkRead(4, byte(i+1))
@@ -152,7 +139,7 @@ func TestBitRead(t *testing.T) {
 		t.Fatalf("got %v, want unexpected EOF", err)
 	}
 
-	br = newBitReader(bytes.NewReader([]byte{1, 2, 3, 4, 5, 6}), 48)
+	br = newBitReader(bytes.NewReader([]byte{1, 2, 3, 4, 5, 6, 8}))
 	checkRead(3, 1)
 	checkRead(2, 0)
 	checkRead(3, 0)

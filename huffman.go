@@ -9,7 +9,6 @@
 package huffman
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -357,26 +356,18 @@ func (t *table) add(val, len uint32, sym Symbol) {
 	}
 }
 
-// Decode decodes encoded data from bs into symbols.
-// bs must have been produced by an [Encoder]; the last byte is a trailer
+// Decode decodes encoded data from r into symbols.
+// The data must have been produced by an [Encoder]; the last byte is a trailer
 // indicating how many bits in the preceding byte are valid.
-func (d *Decoder) Decode(bs []byte) ([]Symbol, error) {
-	if len(bs) == 0 {
-		return nil, errors.New("huffman.Decode: empty input")
-	}
-	trailer := int(bs[len(bs)-1])
-	data := bs[:len(bs)-1]
-	if len(data) == 0 {
-		// Trailer only, no data.
-		return nil, nil
-	}
-	// Total valid bits: all full bytes except the last, plus the trailer value.
-	nbits := (len(data)-1)*8 + trailer
-	br := newBitReader(bytes.NewReader(data), nbits)
+func (d *Decoder) Decode(r io.Reader) ([]Symbol, error) {
+	br := newBitReader(r)
 	var syms []Symbol
-	for nbits > 0 {
+	for br.remaining != 0 {
 		// Peek at the next 8 bits (or fewer at the end).
 		b, err := br.peek()
+		if err == io.EOF {
+			return syms, nil
+		}
 		if err != nil {
 			return syms, err
 		}
@@ -395,7 +386,6 @@ func (d *Decoder) Decode(bs []byte) ([]Symbol, error) {
 				}
 				n -= chunk
 			}
-			nbits -= 8
 			b, err = br.peek()
 			if err != nil {
 				return syms, err
@@ -417,7 +407,6 @@ func (d *Decoder) Decode(bs []byte) ([]Symbol, error) {
 			}
 			n -= chunk
 		}
-		nbits -= int(a.len)
 	}
 	return syms, nil
 }
